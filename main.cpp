@@ -1,105 +1,116 @@
-#include <vector>
-#include <string>
 #include <iostream>
 #include <fstream>
+#include <vector>
 #include <random>
-#include <ctime>
-#include <sstream>
 #include <chrono>
+#include <omp.h>
 
+using namespace std::chrono;
 using namespace std;
 
-void write_to_file(const vector<vector<int>>& matrix, const string& path) {
-    std::ofstream out(path);
-    for (const auto& row : matrix) {
-        for (size_t j = 0; j < row.size(); ++j) {
-            out << row[j];
-            if (j != row.size() - 1) {
-                out << ",";
+void generate_array(vector<vector<int>>& array, size_t size, int seed) {
+    std::mt19937 gen(seed);
+    std::uniform_int_distribution<> distrib(-100, 300);
+    for (size_t i = 0; i < size; i++)
+    {
+        array.push_back(vector<int>());
+        for (size_t j = 0; j < size; j++)
+        {
+            array[i].push_back(distrib(gen));
+        }
+    }
+}
+
+void mat_mul(vector<vector<int>>& array1, vector<vector<int>>& array2, vector<vector<int>>& result) {
+    size_t n = array1.size();
+    int i, j, k;
+#pragma omp parallel for shared(array1, array2, result) private(i, j, k)
+    for (i = 0; i < n; i++) {
+        for (j = 0; j < n; j++) {
+            int value = 0;
+            for (k = 0; k < n; k++) {
+                value += array1[i][k] * array2[k][j];
             }
+            result[i].push_back(value);
         }
-        out << "\n";
     }
 }
 
+void test_mul() {
+    vector<vector<int>> array1;
+    vector<vector<int>> array2;
+    vector<vector<int>> result(10, vector<int>());
+    generate_array(array1, 10, 0);//0 - seed
+    generate_array(array2, 10, 1);//1 - different seed
+    mat_mul(array1, array2, result);
 
-vector<vector<int>> generate(size_t size) {
-    auto engine = mt19937(std::time(nullptr));
-
-    vector<vector<int>> matrix(size, vector<int>(size));
-    uniform_int_distribution<int> dist(0, 10);
-    for (auto& row : matrix) {
-        for (int& elem : row) {
-            elem = dist(engine);
+    ofstream outfile1("array1.txt");
+    for (const auto row : array1) {
+        for (const auto value : row)
+        {
+            outfile1 << value << " ";
         }
+        outfile1 << endl;
     }
-    return matrix;
+    outfile1.close();
+
+    ofstream outfile2("array2.txt");
+    for (const auto row : array2) {
+        for (const auto value : row)
+        {
+            outfile2 << value << " ";
+        }
+        outfile2 << endl;
+    }
+    outfile2.close();
+
+    ofstream outfile3("result.txt");
+    for (const auto row : result) {
+        for (const auto value : row)
+        {
+            outfile3 << value << " ";
+        }
+        outfile3 << endl;
+    }
+    outfile3.close();
 }
 
-vector<vector<int>> read_from_file(const string& path) {
-    std::ifstream in(path);
-    vector<vector<int>> matrix;
-    string line;
+int main()
+{
+    //test_mul();
+    vector<size_t> sizes{5, 10, 25, 50, 100, 250, 500, 750, 1000, 1100};
+    vector<vector<int>> times;
+    int num_tests = 20;
+    for (size_t i = 0; i < sizes.size(); i++) {
+        //float avg_time = 0;
+        times.push_back(vector<int>());
+        for (size_t j = 0; j < num_tests; j++)
+        {
+            vector<vector<int>> array1;
+            vector<vector<int>> array2;
+            vector<vector<int>> result(sizes[i], vector<int>());
 
-    while (getline(in, line)) {
-        istringstream iss(line);
-        vector<int> row;
-        string value;
-        while (getline(iss, value, ',')) {
-            row.push_back(stoi(value));
-        }
-        if (!row.empty()) {
-            matrix.push_back(row);
-        }
-    }
-    return matrix;
-}
+            generate_array(array1, sizes[i], j);//j - seed
+            generate_array(array2, sizes[i], j + 1);//j+1 - different seed
 
-vector<vector<int>> mul_matrix(const vector<vector<int>>& matrix1, const vector<vector<int>>& matrix2) {
-    size_t size = matrix1.size();
-    vector<vector<int>> result(size, vector<int>(size, 0));
-    for (size_t i = 0; i < size; ++i) {
-        for (size_t j = 0; j < size; ++j) {
-            for (size_t k = 0; k < size; ++k) {
-                result[i][j] += matrix1[i][k] * matrix2[k][j];
-            }
-        }
-    }
-    return result;
-}
+            auto start = high_resolution_clock::now();
+            mat_mul(array1, array2, result);
+            auto stop = high_resolution_clock::now();
+            auto duration = duration_cast<microseconds>(stop - start);
 
-int main() {
-    vector<int> counts = {3, 5, 10, 20, 50, 100, 300, 500, 1000};
-    for (const auto& count : counts) {
-        for (int i = 1; i < 3; ++i) {
-            vector<vector<int>> matrix = generate(count);
-            string path = "../matrix_" + to_string(i) + "_size_" + to_string(count) + ".csv";
-            write_to_file(matrix, path);
+            //avg_time += static_cast<int>(duration.count());
+            cout << sizes[i] << ": " << duration.count() << " microseconds" << endl;
+            times[i].push_back(static_cast<int>(duration.count()));
         }
     }
 
-    vector<double> times(counts.size(), 0.0);
-    for (size_t i = 0; i < counts.size(); ++i) {
-        int count = counts[i];
-        string path_1 = "../matrix_1_size_" + to_string(count) + ".csv";
-        string path_2 = "../matrix_2_size_" + to_string(count) + ".csv";
-        string result_path = "../result_size_" + to_string(count) + ".csv";
-
-        auto start_time = chrono::steady_clock::now();
-        vector<vector<int>> matrix_1 = read_from_file(path_1);
-        vector<vector<int>> matrix_2 = read_from_file(path_2);
-        vector<vector<int>> result = mul_matrix(matrix_1, matrix_2);
-        write_to_file(result, result_path);
-        auto end_time = chrono::steady_clock::now();
-
-        times[i] = chrono::duration<double, milli>(end_time - start_time).count();
+    ofstream outfile("times_openmp.txt");
+    for (const auto row : times) {
+        for (const auto value : row)
+        {
+            outfile << value << " ";
+        }
+        outfile << endl;
     }
-
-    std::ofstream out("../matrix_stats.txt");
-    for (size_t i = 0; i < counts.size(); ++i) {
-        out << "размер матрицы: " << counts[i] << "x" << counts[i]
-            << " | время рассчета: " << times[i] << endl;
-    }
-
-    return 0;
+    outfile.close();
 }
